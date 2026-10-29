@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RegiTrack | Registrar Dashboard</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script src="js/app.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      const navItems = [
+        { id: "overview", icon: "▦", label: "Overview" },
+        { id: "requests", icon: "▤", label: "Requests" },
+        { id: "approval", icon: "✓", label: "Approval Queue" },
+      ];
+      document.getElementById("root").innerHTML = commonShell(
+        "Registrar Staff",
+        navItems,
+      );
+      const user = requireRole(["registrar"]);
+      if (user) {
+        shellSetup(
+          user,
+          "Registrar Dashboard",
+          "Academic document request processing",
+        );
+        renderRegistrar();
+      }
+      function renderRegistrar() {
+        const d = readData(),
+          c = document.getElementById("appContent");
+        c.innerHTML = `
+<section data-view="overview"><div class="page-heading"><div><h2>Registrar workspace</h2><p>Review submitted requests and keep students informed of progress.</p></div><button class="btn primary" data-jump="requests">View requests</button></div>
+<div class="notice">Final approval before release must be recorded by the University Registrar or an authorized delegate. Ordinary staff accounts cannot approve release.</div>
+<div class="grid stats">${statCard("Total requests", d.requests.length, "All request records", "R")}${statCard("Needs verification", d.requests.filter((r) => ["Submitted", "Verification", "Requirements Incomplete"].includes(r.status)).length, "Check information and requirements", "V")}${statCard("In processing", d.requests.filter((r) => r.status === "Processing").length, "Being prepared", "P")}${statCard("Awaiting approval", d.requests.filter((r) => r.status === "Pending Approval").length, "Requires authorized approver", "A")}</div>
+${requestTablePanel("Recent document requests", "Search by reference, student, or document type")}
+</section>
+<section data-view="requests" class="hidden"><div class="page-heading"><div><h2>Document requests</h2><p>Review requirements and update each request according to the office workflow.</p></div></div>
+${requestTablePanel("All requests", "Select View for details; use the update panel below to change status")}
+<section class="panel"><div class="panel-head"><div><h3>Update request</h3><p>Statuses are illustrative and must be aligned with the Registrar's approved workflow.</p></div></div>
+<form id="updateForm" class="form-grid"><div class="field"><label for="requestId">Request</label><select id="requestId" required></select></div><div class="field"><label for="newStatus">New status</label><select id="newStatus"><option>Verification</option><option>Requirements Incomplete</option><option>Processing</option><option>Pending Approval</option><option>Ready for Release</option><option>Rejected</option></select></div><div class="field"><label for="releaseDate">Expected release date (if known)</label><input type="date" id="releaseDate"></div><div class="field"><label for="requestNotes">Notes / pending requirements</label><input id="requestNotes" placeholder="e.g., Submit a clearer ID copy"></div><div class="field full"><button class="btn primary" type="submit">Save request update</button></div></form></section></section>
+<section data-view="approval" class="hidden"><div class="page-heading"><div><h2>Approval queue</h2><p>Only the University Registrar or an authorized delegate should approve final release.</p></div></div><div class="notice warn">${user.canApprove ? "Your demo account is marked as an authorized approver. This permission is simulated in the browser." : "Your demo account is not an authorized approver. You can view the queue but cannot approve release."}</div>
+<section class="panel"><div class="panel-head"><div><h3>Requests awaiting final approval</h3><p>Approval records are prototype-only and are not official PCU decisions.</p></div></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Student</th><th>Document</th><th>Status</th><th>Action</th></tr></thead><tbody id="approvalBody"></tbody></table></div></section></section>
+<p class="footer-note">Prototype data is shared only within the same browser profile. Do not enter actual student records or upload real IDs.</p>`;
+        document
+          .querySelectorAll("[data-jump]")
+          .forEach(
+            (b) =>
+              (b.onclick = () =>
+                document
+                  .querySelector('[data-nav="' + b.dataset.jump + '"]')
+                  .click()),
+          );
+        const all = readData().requests;
+        attachRequestFilters(all);
+        renderRequestTable(all);
+        populateRequestSelect();
+        renderApproval();
+        document
+          .getElementById("updateForm")
+          .addEventListener("submit", (e) => {
+            e.preventDefault();
+            const d = readData(),
+              r = d.requests.find(
+                (x) => x.id === document.getElementById("requestId").value,
+              );
+            if (!r) return;
+            const status = document.getElementById("newStatus").value;
+            if (status === "Approved for Release" || status === "Released")
+              return showToast(
+                "Use the authorized approval queue for final approval and release.",
+              );
+            r.status = status;
+            r.releaseDate =
+              document.getElementById("releaseDate").value || r.releaseDate;
+            r.notes = document.getElementById("requestNotes").value.trim();
+            logActivity(d, "Updated " + r.id + " to " + status);
+            saveData(d);
+            renderRegistrar();
+            document.querySelector('[data-nav="requests"]').click();
+            showToast("Request updated.");
+          });
+      }
+      function populateRequestSelect() {
+        const s = document.getElementById("requestId");
+        if (!s) return;
+        s.innerHTML = readData()
+          .requests.map(
+            (r) =>
+              `<option value="${escapeHtml(r.id)}">${escapeHtml(r.id)} — ${escapeHtml(r.student)}</option>`,
+          )
+          .join("");
+      }
+      function renderApproval() {
+        const body = document.getElementById("approvalBody"),
+          d = readData();
+        if (!body) return;
+        const list = d.requests.filter((r) =>
+          ["Pending Approval", "Ready for Release"].includes(r.status),
+        );
+        body.innerHTML =
+          list
+            .map(
+              (r) =>
+                `<tr><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.student)}</td><td>${escapeHtml(r.document)}</td><td>${statusPill(r.status)}</td><td>${user.canApprove ? `<button class="btn primary" data-approve="${escapeHtml(r.id)}">Approve release</button>` : '<span class="pill">View only</span>'}</td></tr>`,
+            )
+            .join("") ||
+          '<tr><td colspan="5" class="empty">No requests currently await approval.</td></tr>';
+        body.querySelectorAll("[data-approve]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              if (!user.canApprove) return;
+              const d = readData(),
+                r = d.requests.find((x) => x.id === b.dataset.approve);
+              if (!r) return;
+              if (
+                !confirm(
+                  "Record final approval for " +
+                    r.id +
+                    "? This is a prototype action, not an official PCU approval.",
+                )
+              )
+                return;
+              r.status = "Approved for Release";
+              logActivity(
+                d,
+                "Authorized approver approved release for " + r.id,
+              );
+              saveData(d);
+              renderRegistrar();
+              document.querySelector('[data-nav="approval"]').click();
+              showToast("Demo approval recorded.");
+            }),
+        );
+      }
+    </script>
+  </body>
+</html>

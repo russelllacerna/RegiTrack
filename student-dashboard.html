@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RegiTrack | Student Dashboard</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script src="js/app.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      const navItems = [
+        { id: "overview", icon: "▦", label: "Overview" },
+        { id: "new-request", icon: "+", label: "New Request" },
+        { id: "my-requests", icon: "▤", label: "My Requests" },
+      ];
+      document.getElementById("root").innerHTML = commonShell(
+        "Student",
+        navItems,
+      );
+      const user = requireRole(["student"]);
+      if (user) {
+        shellSetup(
+          user,
+          "Student Dashboard",
+          "Submit and monitor academic document requests",
+        );
+        renderStudent();
+      }
+      function renderStudent() {
+        const c = document.getElementById("appContent"),
+          d = readData(),
+          mine = d.requests.filter((r) => r.username === user.username);
+        c.innerHTML = `
+<section data-view="overview"><div class="page-heading"><div><h2>Hello, ${escapeHtml(user.name)}</h2><p>Request academic documents and check progress without repeated status inquiries.</p></div><button class="btn primary" data-jump="new-request">+ New request</button></div>
+<div class="notice">Use this demo with sample information only. The prototype does not securely store real IDs or academic records.</div>
+<div class="grid stats">${statCard("My requests", mine.length, "All your demo requests", "R")}${statCard("In progress", mine.filter((r) => !["Released", "Rejected"].includes(r.status)).length, "Currently open", "P")}${statCard("Ready for release", mine.filter((r) => ["Ready for Release", "Approved for Release"].includes(r.status)).length, "Check release instructions", "✓")}${statCard("Released", mine.filter((r) => r.status === "Released").length, "Completed requests", "D")}</div>
+<section class="panel"><div class="panel-head"><div><h3>Recent requests</h3><p>Your request status and reference numbers</p></div><button class="btn" data-jump="my-requests">View all</button></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Document</th><th>Date submitted</th><th>Status</th><th>Release date</th></tr></thead><tbody>${studentRows(mine.slice(0, 5))}</tbody></table></div></section></section>
+<section data-view="new-request" class="hidden"><div class="page-heading"><div><h2>Request an academic document</h2><p>Complete the information below. Fields may be adjusted after confirmation from PCU Registrar staff.</p></div></div>
+<div class="notice">The Registrar interview identified name, course, student number, year attended, requested document, purpose, and (for graduate school, where applicable) coordinator as request information. A valid ID or authorization letter may be required.</div>
+<section class="panel"><div class="panel-head"><div><h3>Request details</h3><p>Required fields are marked with an asterisk.</p></div></div>
+<form id="studentRequestForm" class="form-grid"><div class="field"><label for="studentName">Full name *</label><input id="studentName" value="${escapeHtml(user.name)}" required></div><div class="field"><label for="studentNumber">Student number *</label><input id="studentNumber" placeholder="Enter student number" required></div><div class="field"><label for="course">Course / program *</label><input id="course" placeholder="e.g., BS Information Technology" required></div><div class="field"><label for="yearAttended">Year attended *</label><input id="yearAttended" placeholder="e.g., 2023–2026" required></div><div class="field"><label for="documentType">Requested document *</label><select id="documentType" required>${d.documentTypes.map((x) => `<option>${escapeHtml(x)}</option>`).join("")}</select></div><div class="field"><label for="purpose">Purpose of request *</label><input id="purpose" placeholder="Why do you need this document?" required></div><div class="field"><label for="coordinator">Coordinator (graduate school, if applicable)</label><input id="coordinator" placeholder="Optional"></div><div class="field"><label for="supportingFile">Supporting requirement (demo only)</label><input id="supportingFile" type="file" accept=".pdf,.jpg,.jpeg,.png"><span class="hint">The filename is recorded for this demo only; the file is not uploaded or stored.</span></div><div class="field full"><label for="studentNotes">Additional notes</label><textarea id="studentNotes" placeholder="Optional details"></textarea></div><div class="field full"><label><input id="privacyConsent" type="checkbox" required> I confirm that the information is for this prototype request and understand that actual PCU requirements must be followed.</label></div><div class="field full"><button class="btn primary" type="submit">Submit request</button></div></form></section></section>
+<section data-view="my-requests" class="hidden"><div class="page-heading"><div><h2>My request history</h2><p>Keep your reference number for follow-up.</p></div></div><section class="panel"><div class="panel-head"><h3>All my requests</h3><input id="studentSearch" class="control search" placeholder="Search reference or document"></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Document</th><th>Submitted</th><th>Status</th><th>Release date</th><th>Notes</th></tr></thead><tbody id="myRequestRows">${studentRows(mine)}</tbody></table></div></section></section>
+<p class="footer-note">Notifications are represented by on-screen status and release information in this prototype. In-system notifications and secure document upload need backend implementation.</p>`;
+        document
+          .querySelectorAll("[data-jump]")
+          .forEach(
+            (b) =>
+              (b.onclick = () =>
+                document
+                  .querySelector('[data-nav="' + b.dataset.jump + '"]')
+                  .click()),
+          );
+        document
+          .getElementById("studentRequestForm")
+          .addEventListener("submit", (e) => {
+            e.preventDefault();
+            const d = readData(),
+              file = document.getElementById("supportingFile").files[0];
+            const next =
+              Math.max(
+                0,
+                ...d.requests.map(
+                  (r) => Number((r.id.match(/(\d+)$/) || [])[1]) || 0,
+                ),
+              ) + 1;
+            const id = "RT-2026-" + String(next).padStart(3, "0");
+            const r = {
+              id,
+              student: document.getElementById("studentName").value.trim(),
+              username: user.username,
+              course: document.getElementById("course").value.trim(),
+              studentNumber: document
+                .getElementById("studentNumber")
+                .value.trim(),
+              yearAttended: document
+                .getElementById("yearAttended")
+                .value.trim(),
+              document: document.getElementById("documentType").value,
+              purpose: document.getElementById("purpose").value.trim(),
+              status: "Submitted",
+              submitted: new Date().toISOString().slice(0, 10),
+              releaseDate: "",
+              requirements: file
+                ? "File selected: " + file.name
+                : "No file selected",
+              notes: document.getElementById("studentNotes").value.trim(),
+            };
+            d.requests.unshift(r);
+            logActivity(d, "Student submitted request " + id);
+            saveData(d);
+            showToast("Request submitted. Reference: " + id);
+            renderStudent();
+            document.querySelector('[data-nav="my-requests"]').click();
+          });
+        document
+          .getElementById("studentSearch")
+          .addEventListener("input", () => {
+            const q = document
+              .getElementById("studentSearch")
+              .value.toLowerCase();
+            document.getElementById("myRequestRows").innerHTML = studentRows(
+              readData().requests.filter(
+                (r) =>
+                  r.username === user.username &&
+                  (r.id + " " + r.document + " " + r.status)
+                    .toLowerCase()
+                    .includes(q),
+              ),
+            );
+          });
+      }
+      function studentRows(rows) {
+        if (!rows.length)
+          return '<tr><td colspan="6" class="empty">You have no requests yet.</td></tr>';
+        return rows
+          .map(
+            (r) =>
+              `<tr><td><strong>${escapeHtml(r.id)}</strong></td><td>${escapeHtml(r.document)}</td><td>${formatDate(r.submitted)}</td><td>${statusPill(r.status)}</td><td>${formatDate(r.releaseDate)}</td><td>${escapeHtml(r.notes || "—")}</td></tr>`,
+          )
+          .join("");
+      }
+    </script>
+  </body>
+</html>

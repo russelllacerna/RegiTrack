@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RegiTrack | Admin Dashboard</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script src="js/app.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      const navItems = [
+        { id: "overview", icon: "▦", label: "Overview" },
+        { id: "accounts", icon: "♙", label: "Accounts" },
+        { id: "documents", icon: "▤", label: "Document Types" },
+        { id: "activity", icon: "◷", label: "Activity Logs" },
+      ];
+      document.getElementById("root").innerHTML = commonShell(
+        "Admin",
+        navItems,
+      );
+      const user = requireRole(["admin"]);
+      if (user) {
+        shellSetup(
+          user,
+          "Admin Dashboard",
+          "System overview and configuration",
+        );
+        renderAdmin();
+      }
+      function renderAdmin() {
+        const d = readData(),
+          c = document.getElementById("appContent");
+        c.innerHTML = `
+ <section data-view="overview"><div class="page-heading"><div><h2>System overview</h2><p>Manage RegiTrack accounts, document types, and system activity.</p></div></div>
+ <div class="notice">Admin manages the platform. Final academic document approval remains with the University Registrar or an authorized delegate.</div>
+ <div class="grid stats">${statCard("Total accounts", d.accounts.length, "All prototype accounts", "U")}${statCard("Document types", d.documentTypes.length, "Configured request options", "D")}${statCard("All requests", d.requests.length, "Records in this browser", "R")}${statCard("Open requests", d.requests.filter((r) => !["Released", "Rejected"].includes(r.status)).length, "Not yet closed", "O")}</div>
+ <div class="grid two-col"><section class="panel"><div class="panel-head"><div><h3>Recent requests</h3><p>Latest activity across request records</p></div><button class="btn" data-jump="accounts">Manage accounts</button></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Student</th><th>Status</th></tr></thead><tbody>${d.requests
+   .slice(0, 4)
+   .map(
+     (r) =>
+       `<tr><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.student)}</td><td>${statusPill(r.status)}</td></tr>`,
+   )
+   .join("")}</tbody></table></div></section>
+ <section class="panel"><div class="panel-head"><div><h3>Administration reminders</h3><p>Keep system responsibilities clear</p></div></div><div class="activity-list"><div class="activity">Review account access regularly<small>Deactivate access when no longer required.</small></div><div class="activity">Limit data visibility by role<small>Students should only see their own requests.</small></div><div class="activity">Keep approval authority explicit<small>Only authorized approvers can approve release.</small></div></div></section></div></section>
+ <section data-view="accounts" class="hidden"><div class="page-heading"><div><h2>Account management</h2><p>Create prototype accounts and assign roles. Passwords are not stored in this demo account list.</p></div></div>
+ <section class="panel"><div class="panel-head"><div><h3>Add an account</h3><p>Use demo-only account records; backend authentication is not connected.</p></div></div><form id="accountForm" class="form-grid"><div class="field"><label for="accountName">Full name</label><input id="accountName" required></div><div class="field"><label for="accountUsername">Username</label><input id="accountUsername" required></div><div class="field"><label for="accountRole">Role</label><select id="accountRole"><option>Student</option><option>Registrar Staff</option><option>Admin</option></select></div><div class="field"><label for="accountStatus">Status</label><select id="accountStatus"><option>Active</option><option>Inactive</option></select></div><div class="field full"><label><input type="checkbox" id="accountApprover"> Authorized document approver (only if institutionally approved)</label><p class="hint">This flag demonstrates permissions only; production permissions must be enforced server-side.</p></div><div class="field full"><button class="btn primary" type="submit">Add account</button></div></form></section>
+ <section class="panel"><div class="panel-head"><h3>Existing accounts</h3><input id="accountSearch" class="control search" placeholder="Search name or username"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Approval permission</th><th>Status</th><th>Action</th></tr></thead><tbody id="accountsBody"></tbody></table></div></section></section>
+ <section data-view="documents" class="hidden"><div class="page-heading"><div><h2>Document types</h2><p>Manage the options available on the student request form.</p></div></div><section class="panel"><div class="panel-head"><div><h3>Configured document types</h3><p>Confirm the final list with PCU Registrar staff.</p></div></div><form id="documentForm" class="form-grid"><div class="field full"><label for="documentName">New document type</label><input id="documentName" placeholder="e.g., Certificate of Good Moral Character" required></div><div class="field full"><button class="btn primary" type="submit">Add document type</button></div></form><div class="table-wrap"><table><thead><tr><th>Document type</th><th>Action</th></tr></thead><tbody id="documentsBody"></tbody></table></div></section></section>
+ <section data-view="activity" class="hidden"><div class="page-heading"><div><h2>Activity logs</h2><p>Recent actions recorded by this browser prototype.</p></div></div><section class="panel"><div class="panel-head"><h3>Audit activity</h3></div><div class="activity-list" id="activityBody"></div></section></section>
+ <p class="footer-note">Prototype limitation: localStorage is browser-specific and is not a shared or secure database.</p>`;
+        document.querySelectorAll("[data-jump]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              document
+                .querySelector('[data-nav="' + b.dataset.jump + '"]')
+                .click();
+            }),
+        );
+        renderAccounts();
+        renderDocuments();
+        renderActivity();
+        document
+          .getElementById("accountSearch")
+          .addEventListener("input", renderAccounts);
+        document
+          .getElementById("accountForm")
+          .addEventListener("submit", (e) => {
+            e.preventDefault();
+            const d = readData(),
+              username = document
+                .getElementById("accountUsername")
+                .value.trim();
+            if (
+              d.accounts.some(
+                (a) => a.username.toLowerCase() === username.toLowerCase(),
+              )
+            )
+              return showToast("That username already exists.");
+            d.accounts.push({
+              id: Math.max(0, ...d.accounts.map((a) => a.id)) + 1,
+              name: document.getElementById("accountName").value.trim(),
+              username,
+              role: document.getElementById("accountRole").value,
+              status: document.getElementById("accountStatus").value,
+              canApprove: document.getElementById("accountApprover").checked,
+            });
+            logActivity(d, "Added account " + username);
+            saveData(d);
+            e.target.reset();
+            renderAdmin();
+            document.querySelector('[data-nav="accounts"]').click();
+            showToast("Demo account record added.");
+          });
+        document
+          .getElementById("documentForm")
+          .addEventListener("submit", (e) => {
+            e.preventDefault();
+            const d = readData(),
+              name = document.getElementById("documentName").value.trim();
+            if (
+              d.documentTypes.some(
+                (x) => x.toLowerCase() === name.toLowerCase(),
+              )
+            )
+              return showToast("Document type already exists.");
+            d.documentTypes.push(name);
+            logActivity(d, "Added document type " + name);
+            saveData(d);
+            renderAdmin();
+            document.querySelector('[data-nav="documents"]').click();
+            showToast("Document type added.");
+          });
+      }
+      function renderAccounts() {
+        const d = readData(),
+          q = (
+            document.getElementById("accountSearch")?.value || ""
+          ).toLowerCase(),
+          body = document.getElementById("accountsBody");
+        if (!body) return;
+        body.innerHTML = d.accounts
+          .filter((a) =>
+            (a.name + " " + a.username + " " + a.role)
+              .toLowerCase()
+              .includes(q),
+          )
+          .map(
+            (a) =>
+              `<tr><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.username)}</td><td>${escapeHtml(a.role)}</td><td>${a.canApprove ? '<span class="pill green">Authorized</span>' : "—"}</td><td>${statusPill(a.status)}</td><td><button class="btn" data-toggle-account="${a.id}">${a.status === "Active" ? "Deactivate" : "Activate"}</button></td></tr>`,
+          )
+          .join("");
+        body.querySelectorAll("[data-toggle-account]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const d = readData(),
+                a = d.accounts.find(
+                  (x) => x.id === Number(b.dataset.toggleAccount),
+                );
+              if (!a) return;
+              a.status = a.status === "Active" ? "Inactive" : "Active";
+              logActivity(
+                d,
+                (a.status === "Active" ? "Activated " : "Deactivated ") +
+                  a.username,
+              );
+              saveData(d);
+              renderAccounts();
+              renderActivity();
+              showToast("Account status updated.");
+            }),
+        );
+      }
+      function renderDocuments() {
+        const body = document.getElementById("documentsBody"),
+          d = readData();
+        if (!body) return;
+        body.innerHTML = d.documentTypes
+          .map(
+            (x, i) =>
+              `<tr><td>${escapeHtml(x)}</td><td><button class="btn danger" data-remove-doc="${i}">Remove</button></td></tr>`,
+          )
+          .join("");
+        body.querySelectorAll("[data-remove-doc]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const d = readData(),
+                i = Number(b.dataset.removeDoc),
+                name = d.documentTypes[i];
+              if (
+                !confirm(
+                  "Remove " +
+                    name +
+                    " from the prototype request options? Existing requests are not deleted.",
+                )
+              )
+                return;
+              d.documentTypes.splice(i, 1);
+              logActivity(d, "Removed document type " + name);
+              saveData(d);
+              renderAdmin();
+              document.querySelector('[data-nav="documents"]').click();
+              showToast("Document type removed.");
+            }),
+        );
+      }
+      function renderActivity() {
+        const body = document.getElementById("activityBody"),
+          d = readData();
+        if (body)
+          body.innerHTML =
+            d.activity
+              .map(
+                (a) =>
+                  `<div class="activity"><strong>${escapeHtml(a.action)}</strong><small>${escapeHtml(a.actor)} · ${new Date(a.at).toLocaleString()}</small></div>`,
+              )
+              .join("") || '<p class="empty">No activity recorded.</p>';
+      }
+    </script>
+  </body>
+</html>
