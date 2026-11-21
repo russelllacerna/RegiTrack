@@ -57,7 +57,24 @@ function showToast(message) {
   node.textContent = message; node.classList.remove("hidden");
   clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => node.classList.add("hidden"), 3200);
 }
-function signOut() { sessionStorage.removeItem(ACTOR_KEY); window.location.href = "index.html"; }
+// Calls the PHP API. The server checks the session and role on every call;
+// a 401 (signed out or session expired) sends the user back to the login page.
+async function api(path, options = {}) {
+  const init = { method: options.method || "GET", credentials: "same-origin", headers: { Accept: "application/json" } };
+  if (options.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(options.body); }
+  let res;
+  try { res = await fetch("api/" + path, init); }
+  catch (e) { throw new Error("Cannot reach the server. Is Apache running?"); }
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (res.status === 401 && path !== "login.php") { sessionStorage.removeItem(ACTOR_KEY); window.location.href = "index.html"; throw new Error("Signed out"); }
+  if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ").");
+  return data;
+}
+async function signOut() {
+  try { await api("logout.php", { method: "POST", body: {} }); } catch (e) {}
+  sessionStorage.removeItem(ACTOR_KEY); window.location.href = "index.html";
+}
 function shellSetup(user, title, subtitle) {
   document.getElementById("pageTitle").textContent = title;
   document.getElementById("pageSubtitle").textContent = subtitle;
@@ -90,9 +107,9 @@ function requestRows(requests, options={}) {
   if (!requests.length) return `<tr><td colspan="7" class="empty">No requests match your filters.</td></tr>`;
   return requests.map(r=>`<tr><td><strong>${escapeHtml(r.id)}</strong></td><td>${escapeHtml(r.student)}</td><td>${escapeHtml(r.document)}</td><td>${formatDate(r.submitted)}</td><td>${statusPill(r.status)}</td><td>${formatDate(r.releaseDate)}</td><td><button class="btn" data-request-detail="${escapeHtml(r.id)}">View</button></td></tr>`).join("");
 }
-function bindRequestDetails(root=document) {
+function bindRequestDetails(root=document, rows=[]) {
   root.querySelectorAll("[data-request-detail]").forEach(btn=>btn.addEventListener("click",()=>{
-    const data=readData(), r=data.requests.find(x=>x.id===btn.dataset.requestDetail); if(!r)return;
+    const r=rows.find(x=>x.id===btn.dataset.requestDetail); if(!r)return;
     alert(`Request ${r.id}\nStudent: ${r.student}\nStudent No.: ${r.studentNumber}\nCourse: ${r.course}\nDocument: ${r.document}\nPurpose: ${r.purpose}\nRequirements: ${r.requirements}\nStatus: ${r.status}\nRelease date: ${r.releaseDate || "Not set"}\nNotes: ${r.notes || "None"}`);
   }));
 }
@@ -104,7 +121,7 @@ function renderRequestTable(rows) {
  const search=(document.getElementById("requestSearch")?.value||"").toLowerCase();
  const status=document.getElementById("statusFilter")?.value||"";
  const filtered=rows.filter(r=>(!status||r.status===status)&&[r.id,r.student,r.document,r.studentNumber].some(v=>String(v||"").toLowerCase().includes(search)));
- tbody.innerHTML=requestRows(filtered); bindRequestDetails(tbody);
+ tbody.innerHTML=requestRows(filtered); bindRequestDetails(tbody, rows);
 }
 function attachRequestFilters(rows) {
  document.getElementById("requestSearch")?.addEventListener("input",()=>renderRequestTable(rows));

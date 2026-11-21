@@ -9,13 +9,6 @@ const passwordError = document.getElementById("passwordError");
 const forgotPassword = document.getElementById("forgotPassword");
 const registerLink = document.getElementById("registerLink");
 
-const DEMO_ACCOUNTS = [
-  { username: "admin", password: "admin123", name: "System Administrator", role: "admin" },
-  { username: "registrar", password: "registrar123", name: "Registrar Staff", role: "registrar" },
-  { username: "approver", password: "approver123", name: "Authorized Registrar", role: "registrar", canApprove: true },
-  { username: "student", password: "student123", name: "Demo Student", role: "student" }
-];
-
 function setFieldError(input, errorElement, message) {
   input.closest(".input-wrap").classList.toggle("has-error", Boolean(message));
   errorElement.textContent = message || "";
@@ -45,25 +38,35 @@ loginForm.addEventListener("submit", (event) => {
 
   loginButton.disabled = true;
   loginButton.classList.add("loading");
-  setTimeout(() => {
-    const account = DEMO_ACCOUNTS.find(a => a.username === userValue && a.password === passwordValue);
-    loginButton.disabled = false;
-    loginButton.classList.remove("loading");
-    if (!account) {
-      formMessage.textContent = "Invalid username or password.";
+  fetch("api/login.php", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ username: userValue, password: passwordValue })
+  })
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Sign-in failed. Please try again.");
+      return data.user;
+    })
+    .then((user) => {
+      // Display info only; the server session decides what the user can access.
+      sessionStorage.setItem("regitrackDemoUser", JSON.stringify(user));
+      formMessage.textContent = "Login successful. Opening your dashboard...";
+      formMessage.className = "form-message success";
+      const destination = { admin: "admin-dashboard.html", registrar: "registrar-dashboard.html", student: "student-dashboard.html" }[user.role];
+      setTimeout(() => { window.location.href = destination; }, 350);
+    })
+    .catch((err) => {
+      formMessage.textContent = err.message === "Failed to fetch"
+        ? "Cannot reach the server. Open RegiTrack through XAMPP (http://localhost/regitrack/)."
+        : err.message;
       formMessage.className = "form-message";
-      return;
-    }
-    const user = {
-      username: account.username, name: account.name, role: account.role,
-      canApprove: Boolean(account.canApprove)
-    };
-    sessionStorage.setItem("regitrackDemoUser", JSON.stringify(user));
-    formMessage.textContent = "Login successful. Opening your dashboard...";
-    formMessage.className = "form-message success";
-    const destination = { admin: "admin-dashboard.html", registrar: "registrar-dashboard.html", student: "student-dashboard.html" }[account.role];
-    setTimeout(() => { window.location.href = destination; }, 350);
-  }, 250);
+    })
+    .finally(() => {
+      loginButton.disabled = false;
+      loginButton.classList.remove("loading");
+    });
 });
 forgotPassword.addEventListener("click", (event) => {
   event.preventDefault();
