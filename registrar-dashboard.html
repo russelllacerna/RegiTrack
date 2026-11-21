@@ -28,22 +28,29 @@
         );
         renderRegistrar();
       }
-      function renderRegistrar() {
-        const d = readData(),
-          c = document.getElementById("appContent");
+      let allRequests = [];
+      async function renderRegistrar(view) {
+        const c = document.getElementById("appContent");
+        try {
+          allRequests = (await api("requests.php")).requests;
+        } catch (err) {
+          c.innerHTML = `<div class="notice warn">${escapeHtml(err.message)}</div>`;
+          return;
+        }
+        const d = { requests: allRequests };
         c.innerHTML = `
 <section data-view="overview"><div class="page-heading"><div><h2>Registrar workspace</h2><p>Review submitted requests and keep students informed of progress.</p></div><button class="btn primary" data-jump="requests">View requests</button></div>
 <div class="notice">Final approval before release must be recorded by the University Registrar or an authorized delegate. Ordinary staff accounts cannot approve release.</div>
 <div class="grid stats">${statCard("Total requests", d.requests.length, "All request records", "R")}${statCard("Needs verification", d.requests.filter((r) => ["Submitted", "Verification", "Requirements Incomplete"].includes(r.status)).length, "Check information and requirements", "V")}${statCard("In processing", d.requests.filter((r) => r.status === "Processing").length, "Being prepared", "P")}${statCard("Awaiting approval", d.requests.filter((r) => r.status === "Pending Approval").length, "Requires authorized approver", "A")}</div>
-${requestTablePanel("Recent document requests", "Search by reference, student, or document type")}
+<section class="panel"><div class="panel-head"><div><h3>Recent document requests</h3><p>The five most recent requests</p></div></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Student</th><th>Document</th><th>Submitted</th><th>Status</th><th>Release date</th><th>Action</th></tr></thead><tbody id="recentBody">${requestRows(d.requests.slice(0, 5))}</tbody></table></div></section>
 </section>
 <section data-view="requests" class="hidden"><div class="page-heading"><div><h2>Document requests</h2><p>Review requirements and update each request according to the office workflow.</p></div></div>
 ${requestTablePanel("All requests", "Select View for details; use the update panel below to change status")}
-<section class="panel"><div class="panel-head"><div><h3>Update request</h3><p>Statuses are illustrative and must be aligned with the Registrar's approved workflow.</p></div></div>
-<form id="updateForm" class="form-grid"><div class="field"><label for="requestId">Request</label><select id="requestId" required></select></div><div class="field"><label for="newStatus">New status</label><select id="newStatus"><option>Verification</option><option>Requirements Incomplete</option><option>Processing</option><option>Pending Approval</option><option>Ready for Release</option><option>Rejected</option></select></div><div class="field"><label for="releaseDate">Expected release date (if known)</label><input type="date" id="releaseDate"></div><div class="field"><label for="requestNotes">Notes / pending requirements</label><input id="requestNotes" placeholder="e.g., Submit a clearer ID copy"></div><div class="field full"><button class="btn primary" type="submit">Save request update</button></div></form></section></section>
-<section data-view="approval" class="hidden"><div class="page-heading"><div><h2>Approval queue</h2><p>Only the University Registrar or an authorized delegate should approve final release.</p></div></div><div class="notice warn">${user.canApprove ? "Your demo account is marked as an authorized approver. This permission is simulated in the browser." : "Your demo account is not an authorized approver. You can view the queue but cannot approve release."}</div>
-<section class="panel"><div class="panel-head"><div><h3>Requests awaiting final approval</h3><p>Approval records are prototype-only and are not official PCU decisions.</p></div></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Student</th><th>Document</th><th>Status</th><th>Action</th></tr></thead><tbody id="approvalBody"></tbody></table></div></section></section>
-<p class="footer-note">Prototype data is shared only within the same browser profile. Do not enter actual student records or upload real IDs.</p>`;
+<section class="panel"><div class="panel-head"><div><h3>Update request</h3><p>Every update is recorded with your name, the date, and the time.</p></div></div>
+<form id="updateForm" class="form-grid"><div class="field"><label for="requestId">Request</label><select id="requestId" required></select></div><div class="field"><label for="newStatus">New status</label><select id="newStatus"><option>Verification</option><option>Requirements Incomplete</option><option>Processing</option><option>Pending Approval</option><option>Ready for Release</option><option>Rejected</option></select></div><div class="field"><label for="releaseDate">Expected release date (if known)</label><input type="date" id="releaseDate"></div><div class="field"><label for="requestNotes">Notes / pending requirements (shown to the student)</label><input id="requestNotes" maxlength="1000" placeholder="e.g., Submit a clearer ID copy"></div><div class="field full"><button class="btn primary" id="saveUpdateBtn" type="submit">Save request update</button></div></form></section></section>
+<section data-view="approval" class="hidden"><div class="page-heading"><div><h2>Approval queue</h2><p>Only the University Registrar or an authorized delegate can approve final release.</p></div></div><div class="notice warn">${user.canApprove ? "Your account has approval permission." : "Your account does not have approval permission. You can view the queue but cannot approve release."}</div>
+<section class="panel"><div class="panel-head"><div><h3>Requests awaiting final approval</h3><p>Approvals are checked and recorded by the server.</p></div></div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Student</th><th>Document</th><th>Status</th><th>Action</th></tr></thead><tbody id="approvalBody"></tbody></table></div></section></section>
+<p class="footer-note">Development environment: use fictional data only. Do not enter actual student records.</p>`;
         document
           .querySelectorAll("[data-jump]")
           .forEach(
@@ -53,51 +60,51 @@ ${requestTablePanel("All requests", "Select View for details; use the update pan
                   .querySelector('[data-nav="' + b.dataset.jump + '"]')
                   .click()),
           );
-        const all = readData().requests;
-        attachRequestFilters(all);
-        renderRequestTable(all);
+        bindRequestDetails(document.getElementById("recentBody"), allRequests);
+        attachRequestFilters(allRequests);
+        renderRequestTable(allRequests);
         populateRequestSelect();
         renderApproval();
         document
           .getElementById("updateForm")
-          .addEventListener("submit", (e) => {
+          .addEventListener("submit", async (e) => {
             e.preventDefault();
-            const d = readData(),
-              r = d.requests.find(
-                (x) => x.id === document.getElementById("requestId").value,
-              );
-            if (!r) return;
-            const status = document.getElementById("newStatus").value;
-            if (status === "Approved for Release" || status === "Released")
-              return showToast(
-                "Use the authorized approval queue for final approval and release.",
-              );
-            r.status = status;
-            r.releaseDate =
-              document.getElementById("releaseDate").value || r.releaseDate;
-            r.notes = document.getElementById("requestNotes").value.trim();
-            logActivity(d, "Updated " + r.id + " to " + status);
-            saveData(d);
-            renderRegistrar();
-            document.querySelector('[data-nav="requests"]').click();
-            showToast("Request updated.");
+            const btn = document.getElementById("saveUpdateBtn");
+            btn.disabled = true;
+            try {
+              await api("request_update.php", {
+                method: "POST",
+                body: {
+                  reference: document.getElementById("requestId").value,
+                  status: document.getElementById("newStatus").value,
+                  releaseDate: document.getElementById("releaseDate").value,
+                  notes: document.getElementById("requestNotes").value.trim(),
+                },
+              });
+              await renderRegistrar();
+              document.querySelector('[data-nav="requests"]').click();
+              showToast("Request updated.");
+            } catch (err) {
+              showToast(err.message);
+              btn.disabled = false;
+            }
           });
       }
       function populateRequestSelect() {
         const s = document.getElementById("requestId");
         if (!s) return;
-        s.innerHTML = readData()
-          .requests.map(
+        s.innerHTML = allRequests
+          .filter((r) => !["Approved for Release", "Released"].includes(r.status))
+          .map(
             (r) =>
-              `<option value="${escapeHtml(r.id)}">${escapeHtml(r.id)} — ${escapeHtml(r.student)}</option>`,
+              `<option value="${escapeHtml(r.id)}">${escapeHtml(r.id)} — ${escapeHtml(r.student)} (${escapeHtml(r.status)})</option>`,
           )
           .join("");
       }
       function renderApproval() {
-        const body = document.getElementById("approvalBody"),
-          d = readData();
+        const body = document.getElementById("approvalBody");
         if (!body) return;
-        const list = d.requests.filter((r) =>
+        const list = allRequests.filter((r) =>
           ["Pending Approval", "Ready for Release"].includes(r.status),
         );
         body.innerHTML =
@@ -110,28 +117,16 @@ ${requestTablePanel("All requests", "Select View for details; use the update pan
           '<tr><td colspan="5" class="empty">No requests currently await approval.</td></tr>';
         body.querySelectorAll("[data-approve]").forEach(
           (b) =>
-            (b.onclick = () => {
-              if (!user.canApprove) return;
-              const d = readData(),
-                r = d.requests.find((x) => x.id === b.dataset.approve);
-              if (!r) return;
-              if (
-                !confirm(
-                  "Record final approval for " +
-                    r.id +
-                    "? This is a prototype action, not an official PCU approval.",
-                )
-              )
-                return;
-              r.status = "Approved for Release";
-              logActivity(
-                d,
-                "Authorized approver approved release for " + r.id,
-              );
-              saveData(d);
-              renderRegistrar();
-              document.querySelector('[data-nav="approval"]').click();
-              showToast("Demo approval recorded.");
+            (b.onclick = async () => {
+              if (!confirm("Record final approval for " + b.dataset.approve + "?")) return;
+              try {
+                await api("request_approve.php", { method: "POST", body: { reference: b.dataset.approve } });
+                await renderRegistrar();
+                document.querySelector('[data-nav="approval"]').click();
+                showToast("Approval recorded.");
+              } catch (err) {
+                showToast(err.message);
+              }
             }),
         );
       }

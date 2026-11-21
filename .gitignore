@@ -9,3 +9,5 @@ Thumbs.db
 *.sqlite
 *.mdf
 *.ldf
+api/config.local.php
+uploads/
